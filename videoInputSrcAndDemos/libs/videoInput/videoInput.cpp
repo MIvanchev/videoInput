@@ -25,6 +25,10 @@
 //for threading
 #include <process.h>
 
+#ifndef HEADER
+#define HEADER(pVideoInfo) (&(((VIDEOINFOHEADER *) (pVideoInfo))->bmiHeader))
+#endif
+
 // Due to a missing qedit.h in recent Platform SDKs, we've replicated the relevant contents here
 // #include <qedit.h>
 MIDL_INTERFACE("0579154A-2B53-4994-B0D0-E773148EFF85")
@@ -158,7 +162,7 @@ public:
 
 
 	//------------------------------------------------
-    STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject){
+    STDMETHODIMP QueryInterface(REFIID /*riid*/, void **ppvObject){
         *ppvObject = static_cast<ISampleGrabberCB*>(this);
         return S_OK;
     }
@@ -166,7 +170,7 @@ public:
 
     //This method is meant to have less overhead
 	//------------------------------------------------
-    STDMETHODIMP SampleCB(double Time, IMediaSample *pSample){
+    STDMETHODIMP SampleCB(double /*Time*/, IMediaSample *pSample){
     	if(WaitForSingleObject(hEvent, 0) == WAIT_OBJECT_0) return S_OK;
 
     	HRESULT hr = pSample->GetPointer(&ptrBuffer);
@@ -190,7 +194,7 @@ public:
 
 
     //This method is meant to have more overhead
-    STDMETHODIMP BufferCB(double Time, BYTE *pBuffer, long BufferLen){
+    STDMETHODIMP BufferCB(double /*Time*/, BYTE * /*pBuffer*/, long /*BufferLen*/){
     	return E_NOTIMPL;
     }
 
@@ -332,15 +336,11 @@ void videoDevice::NukeDownstream(IBaseFilter *pBF){
 // ----------------------------------------------------------------------
 
 void videoDevice::destroyGraph(){
-	HRESULT hr = NULL;
- 	int FuncRetval=0;
- 	int NumFilters=0;
+	HRESULT hr = NOERROR;
 
-	int i = 0;
 	while (hr == NOERROR)
 	{
-		IEnumFilters * pEnum = 0;
-		ULONG cFetched;
+		IEnumFilters * pEnum = NULL;
 
 		// We must get the enumerator again every time because removing a filter from the graph
 		// invalidates the enumerator. We always get only the first filter from each enumerator.
@@ -348,37 +348,24 @@ void videoDevice::destroyGraph(){
 		if (FAILED(hr)) { if(verbose)printf("SETUP: pGraph->EnumFilters() failed. \n"); return; }
 
 		IBaseFilter * pFilter = NULL;
-		if (pEnum->Next(1, &pFilter, &cFetched) == S_OK)
+		if (pEnum->Next(1, &pFilter, NULL) == S_OK)
 		{
 			FILTER_INFO FilterInfo={0};
 			hr = pFilter->QueryFilterInfo(&FilterInfo);
 			FilterInfo.pGraph->Release();
 
-			int count = 0;
-			char buffer[255];
-			memset(buffer, 0, 255 * sizeof(char));
-
-			while( FilterInfo.achName[count] != 0x00 )
-			{
-				buffer[count] = static_cast<char>(FilterInfo.achName[count]);
-				count++;
-			}
-
-			if(verbose)printf("SETUP: removing filter %s...\n", buffer);
+			if(verbose)printf("SETUP: removing filter %ls...\n", FilterInfo.achName);
 			hr = pGraph->RemoveFilter(pFilter);
 			if (FAILED(hr)) { if(verbose)printf("SETUP: pGraph->RemoveFilter() failed. \n"); return; }
-			if(verbose)printf("SETUP: filter removed %s  \n",buffer);
+			if(verbose)printf("SETUP: filter removed %ls  \n", FilterInfo.achName);
 
 			pFilter->Release();
 			pFilter = NULL;
 		}
-		else break;
+		else hr = 1;
 		pEnum->Release();
 		pEnum = NULL;
-		i++;
 	}
-
- return;
 }
 
 
@@ -482,17 +469,6 @@ videoDevice::~videoDevice(){
 								(pGraph)->Release();
 								(pGraph) = 0;
 	}
-
-	//delete our pointers
-	delete pDestFilter;
-	delete pVideoInputFilter;
-	delete pGrabberF;
-	delete pGrabber;
-	delete pControl;
-	delete streamConf;
-	delete pMediaEvent;
-	delete pCaptureGraph;
-	delete pGraph;
 
 	if(verbose)printf("SETUP: Device %i disconnected and freed\n\n",myID);
 }
@@ -792,7 +768,7 @@ bool videoInput::setFormat(int deviceNumber, int format){
 // ----------------------------------------------------------------------
 char videoInput::deviceNames[VI_MAX_CAMERAS][255]={{0}};
 
-char * videoInput::getDeviceName(int deviceID){
+const char * videoInput::getDeviceName(int deviceID){
 	if( deviceID >= VI_MAX_CAMERAS ){
 		return NULL;
 	}
@@ -805,7 +781,7 @@ char * videoInput::getDeviceName(int deviceID){
 //
 // ----------------------------------------------------------------------
 
-int videoInput::getDeviceIDFromName(char * name) {
+int videoInput::getDeviceIDFromName(const char * name) {
 
 	if (listDevices(true) == 0) return -1;
 
@@ -825,7 +801,7 @@ std::vector <std::string> videoInput::getDeviceList(){
 	int numDev = videoInput::listDevices(true);
 	std::vector <std::string> deviceList; 
 	for(int i = 0; i < numDev; i++){
-		char * name =  videoInput::getDeviceName(i); 
+		const char * name =  videoInput::getDeviceName(i);
 		if( name == NULL )break; 
 		deviceList.push_back(name); 
 	}
@@ -1142,7 +1118,6 @@ bool videoInput::getVideoSettingFilter(int deviceID, long Property, long &min, l
 	if( !isDeviceSetup(deviceID) )return false;
 
 	HRESULT hr;
-	bool isSuccessful = false;
 
 	videoDevice * VD = VDList[deviceID];
 
@@ -1218,7 +1193,6 @@ bool videoInput::setVideoSettingFilter(int deviceID, long Property, long lValue,
 	if( !isDeviceSetup(deviceID) )return false;
 
 	HRESULT hr;
-	bool isSuccessful = false;
 
 	videoDevice * VD = VDList[deviceID];
 
@@ -1341,7 +1315,6 @@ bool videoInput::getVideoSettingCamera(int deviceID, long Property, long &min, l
 	if( !isDeviceSetup(deviceID) )return false;
 
 	HRESULT hr;
-	bool isSuccessful = false;
 
 	videoDevice * VD = VDList[deviceID];
 
@@ -1584,10 +1557,6 @@ void videoInput::processPixels(unsigned char * src, unsigned char * dst, int wid
 	int numBytes = widthInBytes * height;
 
 	if(!bRGB){
-
-		int x = 0;
-		int y = 0;
-
 		if(bFlip){
 			for(int y = 0; y < height; y++){
 				memcpy(dst + (y * widthInBytes), src + ( (height -y -1) * widthInBytes), widthInBytes);
@@ -1777,8 +1746,6 @@ static bool setSizeAndSubtype(videoDevice * VD, int attemptWidth, int attemptHei
 	VIDEOINFOHEADER *pVih =  reinterpret_cast<VIDEOINFOHEADER*>(VD->pAmMediaType->pbFormat);
 
 	//store current size
-	int tmpWidth  = HEADER(pVih)->biWidth;
-	int tmpHeight = HEADER(pVih)->biHeight;
 	AM_MEDIA_TYPE * tmpType = NULL;
 
 	HRESULT	hr = VD->streamConf->GetFormat(&tmpType);
